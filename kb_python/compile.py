@@ -1,4 +1,5 @@
 import os
+import shlex
 import shutil
 import tempfile
 from typing import Dict, Optional
@@ -132,6 +133,18 @@ def compile_kallisto(
         'See https://pachterlab.github.io/kallisto/source for more information.'
     )
     os.chdir(source_dir)
+    for path, old, new in [
+        (os.path.join(source_dir, 'ext', 'bifrost', 'CMakeLists.txt'),
+         '-mno-avx2', ''),
+        (os.path.join(source_dir, 'ext', 'bifrost', 'src', 'DataStorage.tcc'),
+         'o.sz_link[i].load()', 'o.unitig_cs_link[i].load()'),
+    ]:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                text = f.read()
+            if old in text:
+                with open(path, 'w') as f:
+                    f.write(text.replace(old, new))
     shutil.copyfile(
         'license.txt',
         os.path.join(os.path.dirname(binary_path), 'license.txt')
@@ -145,9 +158,18 @@ def compile_kallisto(
     os.chdir('build')
     cmake_command = ['cmake', '..']
     if cmake_arguments:
-        cmake_command.append(cmake_arguments)
-    run_executable(cmake_command)
-    run_executable(['make'])
+        cmake_command.extend(shlex.split(cmake_arguments))
+
+    original_policy = os.environ.get('CMAKE_POLICY_VERSION_MINIMUM')
+    os.environ['CMAKE_POLICY_VERSION_MINIMUM'] = '3.5'
+    try:
+        run_executable(cmake_command)
+        run_executable(['make'])
+    finally:
+        if original_policy is None:
+            os.environ.pop('CMAKE_POLICY_VERSION_MINIMUM', None)
+        else:
+            os.environ['CMAKE_POLICY_VERSION_MINIMUM'] = original_policy
     os.makedirs(os.path.dirname(binary_path), exist_ok=True)
     shutil.copy2(
         os.path.join(
